@@ -1,0 +1,355 @@
+name: Deploy to Staging — MediaStar v3 Backend
+
+on:
+  push:
+    branches:
+      - staging
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    name: Build & Deploy to ECS
+    runs-on: ubuntu-latest
+    environment: staging-mediastar-v3-be
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+
+      - name: Build API Natively
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm prisma:generate
+          pnpm exec nx run-many --target=build --projects=api,email-sync,email-classifier,queue-worker,breakglass-cli
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Sanitize Variables
+        run: |
+          echo "C_REPO=$(echo '${{ vars.ECR_REPOSITORY }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_SYNC_REPO=$(echo '${{ vars.ECR_SYNC_REPOSITORY }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_CLASSIFIER_REPO=$(echo '${{ vars.ECR_CLASSIFIER_REPOSITORY }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_QUEUE_WORKER_REPO=$(echo '${{ vars.ECR_QUEUE_WORKER_REPOSITORY }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_CLUSTER=$(echo '${{ vars.ECS_CLUSTER }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_TASK_DEF=$(echo '${{ vars.ECS_TASK_DEFINITION }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_CONTAINER=$(echo '${{ vars.ECS_CONTAINER }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_SERVICE=$(echo '${{ vars.ECS_SERVICE }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_SYNC_TASK_DEF=$(echo '${{ vars.ECS_SYNC_TASK_DEFINITION }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_SYNC_CONTAINER=$(echo '${{ vars.ECS_SYNC_CONTAINER }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_SYNC_SERVICE=$(echo '${{ vars.ECS_SYNC_SERVICE }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_CLASSIFIER_TASK_DEF=$(echo '${{ vars.ECS_CLASSIFIER_TASK_DEFINITION }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_CLASSIFIER_CONTAINER=$(echo '${{ vars.ECS_CLASSIFIER_CONTAINER }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_CLASSIFIER_SERVICE=$(echo '${{ vars.ECS_CLASSIFIER_SERVICE }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_QUEUE_WORKER_TASK_DEF=$(echo '${{ vars.ECS_QUEUE_WORKER_TASK_DEFINITION }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_QUEUE_WORKER_CONTAINER=$(echo '${{ vars.ECS_QUEUE_WORKER_CONTAINER }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_QUEUE_WORKER_SERVICE=$(echo '${{ vars.ECS_QUEUE_WORKER_SERVICE }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_SG=$(echo '${{ vars.SECURITY_GROUP_ID }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+          echo "C_SUBNETS=$(echo '${{ vars.SUBNET_IDS }}' | tr -d '\r\n' | xargs)" >> $GITHUB_ENV
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.C_REPO }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.C_REPO }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.C_SYNC_REPO }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.C_SYNC_REPO }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.C_CLASSIFIER_REPO }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.C_CLASSIFIER_REPO }}:${{ github.sha }}
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.C_QUEUE_WORKER_REPO }}:latest
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.C_QUEUE_WORKER_REPO }}:${{ github.sha }}
+
+      - name: Download task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$C_TASK_DEF" \
+            --query taskDefinition > task-definition.json
+
+      - name: Update task definition with new image
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.C_CONTAINER }}
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.C_REPO }}:${{ github.sha }}
+
+      - name: Register new task definition
+        run: |
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://${{ steps.task-def.outputs.task-definition }} \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          echo "NEW_TASK_DEF_ARN=$NEW_TASK_DEF_ARN" >> $GITHUB_ENV
+          echo "Registered new task definition: $NEW_TASK_DEF_ARN"
+
+      - name: Run database migrations
+        run: |
+          OVERRIDES="{\"containerOverrides\":[{\"name\":\"$C_CONTAINER\",\"command\":[\"pnpm\",\"prisma:migrate:deploy\"]}]}"
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "$C_CLUSTER" \
+            --task-definition "$NEW_TASK_DEF_ARN" \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[$C_SUBNETS],securityGroups=[$C_SG],assignPublicIp=DISABLED}" \
+            --overrides "$OVERRIDES" \
+            --query 'tasks[0].taskArn' \
+            --output text)
+
+          echo "Migration task ARN: $TASK_ARN"
+          TASK_ID=$(basename "$TASK_ARN")
+
+          aws ecs wait tasks-stopped \
+            --cluster "$C_CLUSTER" \
+            --tasks "$TASK_ARN"
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster "$C_CLUSTER" \
+            --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)
+
+          echo "Migration exit code: $EXIT_CODE"
+
+          echo "--- Migration Logs ---"
+          sleep 10
+          aws logs get-log-events \
+            --log-group-name "/ecs/$C_CONTAINER" \
+            --log-stream-name "ecs/$C_CONTAINER/$TASK_ID" \
+            --limit 100 \
+            --query 'events[*].message' \
+            --output text 2>/dev/null || echo "Could not fetch logs from CloudWatch"
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed!"
+            exit 1
+          fi
+          echo "Migrations completed successfully!"
+
+      - name: Run database seed
+        continue-on-error: true
+        run: |
+          OVERRIDES="{\"containerOverrides\":[{\"name\":\"$C_CONTAINER\",\"command\":[\"pnpm\",\"exec\",\"tsx\",\"libs/database/prisma/seed-cli.ts\"]}]}"
+
+          TASK_ARN=$(aws ecs run-task \
+          --cluster "$C_CLUSTER" \
+          --task-definition "$C_TASK_DEF" \
+          --launch-type FARGATE \
+          --network-configuration "awsvpcConfiguration={subnets=[$C_SUBNETS],securityGroups=[$C_SG],assignPublicIp=DISABLED}" \
+          --overrides "$OVERRIDES" \
+          --query 'tasks[0].taskArn' \
+          --output text)
+
+          echo "Seed task ARN: $TASK_ARN"
+
+          aws ecs wait tasks-stopped \
+          --cluster "$C_CLUSTER" \
+          --tasks "$TASK_ARN"
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+          --cluster "$C_CLUSTER" \
+          --tasks "$TASK_ARN" \
+          --query 'tasks[0].containers[0].exitCode' \
+          --output text)
+
+          echo "Seed exit code: $EXIT_CODE"
+          echo "Seed step completed (non-blocking)"
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ env.C_SERVICE }}
+          cluster: ${{ env.C_CLUSTER }}
+          wait-for-service-stability: true
+
+      - name: Download sync task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$C_SYNC_TASK_DEF" \
+            --query taskDefinition > sync-task-definition.json
+
+      - name: Update sync task definition with new image
+        id: sync-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: sync-task-definition.json
+          container-name: ${{ env.C_SYNC_CONTAINER }}
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.C_SYNC_REPO }}:${{ github.sha }}
+
+      - name: Deploy sync worker to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.sync-task-def.outputs.task-definition }}
+          service: ${{ env.C_SYNC_SERVICE }}
+          cluster: ${{ env.C_CLUSTER }}
+          wait-for-service-stability: false
+
+      - name: Download classifier task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$C_CLASSIFIER_TASK_DEF" \
+            --query taskDefinition > classifier-task-definition.json
+
+      - name: Update classifier task definition with new image
+        id: classifier-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: classifier-task-definition.json
+          container-name: ${{ env.C_CLASSIFIER_CONTAINER }}
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.C_CLASSIFIER_REPO }}:${{ github.sha }}
+
+      - name: Deploy classifier worker to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.classifier-task-def.outputs.task-definition }}
+          service: ${{ env.C_CLASSIFIER_SERVICE }}
+          cluster: ${{ env.C_CLUSTER }}
+          wait-for-service-stability: false
+
+      - name: Download queue-worker task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition "$C_QUEUE_WORKER_TASK_DEF" \
+            --query taskDefinition > queue-worker-task-definition.json
+
+      - name: Update queue-worker task definition with new image
+        id: queue-worker-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: queue-worker-task-definition.json
+          container-name: ${{ env.C_QUEUE_WORKER_CONTAINER }}
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.C_QUEUE_WORKER_REPO }}:${{ github.sha }}
+
+      - name: Deploy queue-worker to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.queue-worker-task-def.outputs.task-definition }}
+          service: ${{ env.C_QUEUE_WORKER_SERVICE }}
+          cluster: ${{ env.C_CLUSTER }}
+          wait-for-service-stability: false
+
+      - name: Sanitize commit message
+        id: sanitize_msg
+        if: always()
+        run: |
+          CLEAN_MSG=$(echo "${{ github.event.head_commit.message }}" | head -n 1 | tr -d '"' | tr -d '\\')
+          echo "msg=$CLEAN_MSG" >> $GITHUB_OUTPUT
+
+      - name: Set Slack notification variables
+        id: slack_vars
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "color=#36a64f" >> $GITHUB_OUTPUT
+            echo "title=✅ Deployment Succeeded — MediaStar v3 Backend" >> $GITHUB_OUTPUT
+            echo "status_text=Successfully deployed to staging" >> $GITHUB_OUTPUT
+
+          elif [ "${{ job.status }}" == "cancelled" ]; then
+            # Detect auto-cancel by concurrency: check for a newer run that is actively
+            # in_progress or queued. This avoids false positives where a manual cancel
+            # is followed by an unrelated push — the new run must still be actively running.
+            NEWER=$(gh api "repos/${{ github.repository }}/actions/workflows/ms-staging-deploy.yml/runs?branch=staging&per_page=5" \
+              --jq "[.workflow_runs[] | select(.run_number > ${{ github.run_number }} and (.status == \"in_progress\" or .status == \"queued\"))] | length" 2>/dev/null || echo "0")
+            if [ "$NEWER" -gt "0" ]; then
+              echo "color=#aaaaaa" >> $GITHUB_OUTPUT
+              echo "title=⏭️ Deployment Skipped — MediaStar v3 Backend" >> $GITHUB_OUTPUT
+              echo "status_text=Auto-cancelled — a newer deployment is already running" >> $GITHUB_OUTPUT
+            else
+              echo "color=#e8a838" >> $GITHUB_OUTPUT
+              echo "title=🚫 Deployment Manually Cancelled — MediaStar v3 Backend" >> $GITHUB_OUTPUT
+              echo "status_text=Manually cancelled by a team member — check if re-run is needed" >> $GITHUB_OUTPUT
+            fi
+
+          else
+            echo "color=#e01e5a" >> $GITHUB_OUTPUT
+            echo "title=🛑 Deployment Failed — MediaStar v3 Backend" >> $GITHUB_OUTPUT
+            echo "status_text=Deployment failed — check logs immediately" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "attachments": [
+                {
+                  "color": "${{ steps.slack_vars.outputs.color }}",
+                  "blocks": [
+                    {
+                      "type": "header",
+                      "text": {
+                        "type": "plain_text",
+                        "text": "${{ steps.slack_vars.outputs.title }}"
+                      }
+                    },
+                    {
+                      "type": "section",
+                      "fields": [
+                        { "type": "mrkdwn", "text": "*Environment:*\n`staging-mediastar-v3-be`" },
+                        { "type": "mrkdwn", "text": "*Status:*\n${{ steps.slack_vars.outputs.status_text }}" }
+                      ]
+                    },
+                    {
+                      "type": "section",
+                      "text": {
+                        "type": "mrkdwn",
+                        "text": "*Changes:*\n${{ steps.sanitize_msg.outputs.msg }}"
+                      }
+                    },
+                    {
+                      "type": "section",
+                      "fields": [
+                        { "type": "mrkdwn", "text": "*Triggered by:*\n`${{ github.actor }}`" },
+                        { "type": "mrkdwn", "text": "*Run:*\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|#${{ github.run_number }}>" }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Done
+        run: echo "Deployment completed — MediaStar v3 Backend staging updated"

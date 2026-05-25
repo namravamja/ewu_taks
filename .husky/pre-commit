@@ -1,0 +1,10 @@
+export CI=true
+
+pnpm exec lint-staged
+pnpm build:all
+
+# Typecheck affected projects (only staged files)
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR | paste -sd ',' -)
+if [ -n "$STAGED_FILES" ]; then
+  pnpm exec nx affected --target=typecheck --files="$STAGED_FILES"
+fi

@@ -1,0 +1,537 @@
+generator client {
+  provider        = "prisma-client"
+  binaryTargets   = ["native", "linux-arm64-openssl-3.0.x"]
+  output          = "../src/lib/generated/prisma"
+  previewFeatures = ["partialIndexes", "postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [citext, pg_trgm]
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  INACTIVE
+  REJECTED
+  INVITED
+  REVOKED
+
+  @@map("user_status")
+}
+
+enum NotificationType {
+  SYSTEM
+  ACCOUNT
+  INVITE
+  APPROVAL
+
+  @@map("notification_type")
+}
+
+enum NotificationSeverity {
+  INFO
+  WARNING
+  URGENT
+
+  @@map("notification_severity")
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+
+  @@map("invite_status")
+}
+
+enum PermissionScope {
+  ALL
+  OWN
+  ASSIGNED
+  TEAM
+
+  @@map("permission_scope")
+}
+
+enum UserType {
+  USER
+  AGENCY
+  ATTORNEY
+
+  @@map("user_type")
+}
+
+enum CaseSource {
+  BOB
+  EMMA
+  PR_TEAM
+
+  @@map("case_source")
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+
+  @@map("priority")
+}
+
+// ---------------------------------------------------------------------------
+// Auth & Authorization
+// ---------------------------------------------------------------------------
+
+model Role {
+  id          Int     @id @default(autoincrement())
+  name        String  @unique @db.Citext
+  description String? @db.VarChar(500)
+  isBuiltIn   Boolean @default(false) @map("is_built_in")
+  level       Int     @default(0)
+  isExternal  Boolean @default(false) @map("is_external")
+
+  isDeleted Boolean   @default(false) @map("is_deleted")
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy Int?      @map("deleted_by")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  userRoles       UserRole[]       @relation("RoleUserRoles")
+  deletedByUser   User?            @relation("RoleDeletedBy", fields: [deletedBy], references: [id], onDelete: SetNull)
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          Int     @id @default(autoincrement())
+  module      String  @db.VarChar(100)
+  action      String  @db.VarChar(100)
+  description String? @db.VarChar(500)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  rolePermissions RolePermission[]
+
+  @@unique([module, action], map: "uq_permission_module_action")
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           Int             @id @default(autoincrement())
+  roleId       Int             @map("role_id")
+  permissionId Int             @map("permission_id")
+  scope        PermissionScope @default(ALL)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId, scope], map: "uq_role_permission_scope")
+  @@index([roleId], map: "idx_role_permission_role")
+  @@index([permissionId], map: "idx_role_permission_perm")
+  @@map("role_permissions")
+}
+
+model UserRole {
+  id         Int      @id @default(autoincrement())
+  userId     Int      @map("user_id")
+  roleId     Int      @map("role_id")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  assignedBy Int?     @map("assigned_by")
+
+  user User @relation("UserUserRoles", fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation("RoleUserRoles", fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, roleId], map: "uq_user_role")
+  @@index([userId], map: "idx_user_role_user")
+  @@index([roleId], map: "idx_user_role_role")
+  @@map("user_roles")
+}
+
+model UserInvitation {
+  id          Int          @id @default(autoincrement())
+  userId      Int          @unique @map("user_id")
+  invitedBy   Int?         @map("invited_by")
+  tokenHash   String?      @unique @map("token_hash")
+  tokenExpiry DateTime?    @map("token_expiry") @db.Timestamptz
+  status      InviteStatus @default(PENDING)
+  acceptedAt  DateTime?    @map("accepted_at") @db.Timestamptz
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user    User  @relation("UserInvitation", fields: [userId], references: [id], onDelete: Cascade)
+  inviter User? @relation("InvitedByUser", fields: [invitedBy], references: [id], onDelete: SetNull)
+
+  @@index([invitedBy], map: "idx_invitation_invited_by")
+  @@index([status], map: "idx_invitation_status")
+  @@map("user_invitations")
+}
+
+model Session {
+  id               Int     @id @default(autoincrement())
+  userId           Int     @map("user_id")
+  refreshTokenHash String  @map("refresh_token_hash") @db.VarChar(255)
+  ipAddress        String? @map("ip_address") @db.VarChar(45)
+  userAgent        String? @map("user_agent") @db.VarChar(500)
+  metadata         Json?   @db.JsonB
+
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_session_user")
+  @@index([expiresAt], map: "idx_session_expires_at")
+  @@map("sessions")
+}
+
+model AuditLog {
+  id            Int     @id @default(autoincrement())
+  userId        Int?    @map("user_id")
+  action        String  @db.VarChar(100)
+  entityType    String  @map("entity_type") @db.VarChar(100)
+  entityId      String? @map("entity_id") @db.VarChar(100)
+  changes       Json?
+  ipAddress     String? @map("ip_address") @db.VarChar(45)
+  userAgent     String? @map("user_agent") @db.VarChar(500)
+  correlationId String? @map("correlation_id") @db.VarChar(100)
+  severity      String? @db.VarChar(20)
+  description   String? @db.VarChar(500)
+  resourceName  String? @map("resource_name") @db.VarChar(200)
+  httpMethod    String? @map("http_method") @db.VarChar(10)
+  httpPath      String? @map("http_path") @db.VarChar(500)
+  statusCode    Int?    @map("status_code")
+  duration      Int?
+  targetUserId  Int?    @map("target_user_id")
+  outcome       String? @db.VarChar(20)
+  sessionId     Int?    @map("session_id")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId], map: "idx_audit_entity")
+  @@index([userId], map: "idx_audit_user")
+  @@index([createdAt], map: "idx_audit_created_at")
+  @@index([severity], map: "idx_audit_severity")
+  @@index([targetUserId], map: "idx_audit_target_user")
+  @@index([action, targetUserId, createdAt], map: "idx_audit_action_target_created")
+  @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// User Management
+// ---------------------------------------------------------------------------
+
+model User {
+  id                       Int        @id @default(autoincrement())
+  firstName                String?    @map("first_name") @db.VarChar(100)
+  lastName                 String?    @map("last_name") @db.VarChar(100)
+  email                    String     @unique @db.VarChar(255)
+  phone                    String?    @db.VarChar(20)
+  passwordHash             String?    @map("password_hash") @db.VarChar(255)
+  previousPasswordHash     String?    @map("previous_password_hash") @db.VarChar(255)
+  type                     UserType   @default(USER)
+  city                     String?    @db.VarChar(100)
+  state                    String?    @db.VarChar(50)
+  zip                      String?    @db.VarChar(20)
+  isCredentialEnabled      Boolean    @default(true) @map("is_credential_enabled")
+  status                   UserStatus @default(PENDING)
+  resetToken               String?    @map("reset_token") @db.VarChar(255)
+  passwordResetRequestedAt DateTime?  @map("password_reset_requested_at") @db.Timestamptz
+  loginAttempts            Int        @default(0) @map("login_attempts")
+  loginAttemptsLockout     DateTime?  @map("login_attempts_lockout") @db.Timestamptz
+  lastLoginAt              DateTime?  @map("last_login_at") @db.Timestamptz
+  reviewedBy               Int?       @map("reviewed_by")
+  reviewedAt               DateTime?  @map("reviewed_at") @db.Timestamptz
+  rejectionReason          String?    @map("rejection_reason")
+  suspendedAt              DateTime?  @map("suspended_at") @db.Timestamptz
+  suspendedBy              Int?       @map("suspended_by")
+  deactivatedAt            DateTime?  @map("deactivated_at") @db.Timestamptz
+  deactivatedBy            Int?       @map("deactivated_by")
+  setPasswordToken         String?    @map("set_password_token") @db.VarChar(255)
+  setPasswordRequestedAt   DateTime?  @map("set_password_requested_at") @db.Timestamptz
+
+  case Case[] @relation("UserCases")
+
+  isDeleted Boolean   @default(false) @map("is_deleted")
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+  deletedBy Int?      @map("deleted_by")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  twoFactorGracePeriodEnd      DateTime? @map("two_factor_grace_period_end") @db.Timestamptz
+  isTwoFactorEnabled           Boolean   @default(false) @map("is_two_factor_enabled")
+  isTwoFactorEnforced          Boolean   @default(false) @map("is_two_factor_enforced")
+  twoFactorSecret              String?   @map("two_factor_secret") @db.VarChar(500)
+  twoFactorConfirmedAt         DateTime? @map("two_factor_confirmed_at") @db.Timestamptz
+  twoFactorAttempts            Int       @default(0) @map("two_factor_attempts")
+  twoFactorAttemptsLockout     DateTime? @map("two_factor_attempts_lockout") @db.Timestamptz
+  twoFactorRecoveryToken       String?   @unique @map("two_factor_recovery_token") @db.VarChar(255)
+  twoFactorRecoveryRequestedAt DateTime? @map("two_factor_recovery_requested_at") @db.Timestamptz
+
+  invitation         UserInvitation?     @relation("UserInvitation")
+  sentInvitations    UserInvitation[]    @relation("InvitedByUser")
+  deletedByUser      User?               @relation("UserDeletedBy", fields: [deletedBy], references: [id], onDelete: SetNull)
+  deletedUsers       User[]              @relation("UserDeletedBy")
+  deletedRoles       Role[]              @relation("RoleDeletedBy")
+  reviewer           User?               @relation("UserReviewedBy", fields: [reviewedBy], references: [id], onDelete: SetNull)
+  reviewedUsers      User[]              @relation("UserReviewedBy")
+  suspendedByUser    User?               @relation("UserSuspendedBy", fields: [suspendedBy], references: [id], onDelete: SetNull)
+  suspendedUsers     User[]              @relation("UserSuspendedBy")
+  deactivatedByUser  User?               @relation("UserDeactivatedBy", fields: [deactivatedBy], references: [id], onDelete: SetNull)
+  deactivatedUsers   User[]              @relation("UserDeactivatedBy")
+  userRoles          UserRole[]          @relation("UserUserRoles")
+  sessions           Session[]
+  auditLogs          AuditLog[]
+  notifications      Notification[]      @relation("UserNotifications")
+  actorNotifications Notification[]      @relation("NotificationActor")
+  backupCodes        BackupCode[]
+  trustedDevices     TrustedDevice[]
+  settings           UserSettings?       @relation("UserSettings")
+  providerChangeLogs ProviderChangeLog[]
+
+  @@index([status], map: "idx_user_status")
+  @@index([resetToken], map: "idx_user_reset_token")
+  @@index([deletedBy], map: "idx_user_deleted_by")
+  @@index([reviewedBy], map: "idx_user_reviewed_by")
+  @@index([suspendedBy], map: "idx_user_suspended_by")
+  @@index([deactivatedBy], map: "idx_user_deactivated_by")
+  @@index([setPasswordToken], map: "idx_user_set_password_token")
+  @@index([isTwoFactorEnforced, twoFactorGracePeriodEnd], map: "idx_user_2fa_enforcement")
+  @@index([createdAt], map: "idx_user_created_at")
+  @@index([lastLoginAt], map: "idx_user_last_login_at")
+  @@index([firstName(ops: raw("gin_trgm_ops"))], map: "idx_user_first_name_trgm", type: Gin)
+  @@index([lastName(ops: raw("gin_trgm_ops"))], map: "idx_user_last_name_trgm", type: Gin)
+  @@index([email(ops: raw("gin_trgm_ops"))], map: "idx_user_email_trgm", type: Gin)
+  @@map("users")
+}
+
+model Stages {
+  id   Int    @id @default(autoincrement())
+  stageTitle String @db.VarChar(100)
+  caseCount Int @default(0) @map("case_count")
+
+  case Case[] @relation("CaseStages")
+
+  @@map("stages")
+}
+
+model UserSettings {
+  id     Int @id @default(autoincrement())
+  userId Int @unique @map("user_id")
+
+  inAppEnabled       Boolean @default(true) @map("in_app_enabled")
+  emailEnabled       Boolean @default(true) @map("email_enabled")
+  smsEnabled         Boolean @default(false) @map("sms_enabled")
+  pushEnabled        Boolean @default(false) @map("push_enabled")
+  promotionalEnabled Boolean @default(true) @map("promotional_enabled")
+
+  quietHoursStart String? @map("quiet_hours_start") @db.VarChar(5)
+  quietHoursEnd   String? @map("quiet_hours_end") @db.VarChar(5)
+
+  notificationOverrides Json? @map("notification_overrides") @db.JsonB
+
+  timezone          String @default("UTC") @db.VarChar(50)
+  reminderHourLocal Int    @default(10) @map("reminder_hour_local")
+  locale            String @default("en-US") @db.VarChar(10)
+  theme             String @default("SYSTEM") @db.VarChar(10)
+
+  defaultLandingPage String  @default("/dashboard") @map("default_landing_page") @db.VarChar(100)
+  sidebarCollapsed   Boolean @default(false) @map("sidebar_collapsed")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation("UserSettings", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model BackupCode {
+  id        Int       @id @default(autoincrement())
+  userId    Int       @map("user_id")
+  hash      String    @db.VarChar(255)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_backup_code_user")
+  @@map("backup_codes")
+}
+
+model TrustedDevice {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  tokenHash String   @unique @map("token_hash") @db.VarChar(255)
+  label     String?  @db.VarChar(255)
+  ipAddress String?  @map("ip_address") @db.VarChar(45)
+  userAgent String?  @map("user_agent") @db.VarChar(500)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_trusted_device_user")
+  @@index([expiresAt], map: "idx_trusted_device_expires")
+  @@map("trusted_devices")
+}
+
+model ProviderChangeLog {
+  id        Int    @id @default(autoincrement())
+  userId    Int    @map("user_id")
+  source    String @db.VarChar(50)
+  fromState Json   @map("from_state") @db.JsonB
+  toState   Json   @map("to_state") @db.JsonB
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt], map: "idx_pcl_user_created")
+  @@index([source, createdAt], map: "idx_pcl_source_created")
+  @@map("provider_change_logs")
+}
+
+model Notification {
+  id          Int                  @id @default(autoincrement())
+  recipientId Int                  @map("recipient_id")
+  type        NotificationType
+  severity    NotificationSeverity @default(INFO)
+  mainTitle   String?              @map("main_title")
+  title       String
+  body        String
+  metadata    Json?
+  entityType  String?              @map("entity_type") @db.VarChar(50)
+  entityId    Int?                 @map("entity_id")
+  isRead      Boolean              @default(false) @map("is_read")
+  readAt      DateTime?            @map("read_at") @db.Timestamptz
+
+  jobId     String?   @unique @map("job_id")
+  category  String?   @map("category") @db.VarChar(50)
+  eventKey  String?   @map("event_key") @db.VarChar(100)
+  groupKey  String?   @map("group_key") @db.VarChar(255)
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz
+
+  scheduledForUtc   DateTime? @map("scheduled_for_utc") @db.Timestamptz
+  scheduledTimezone String?   @map("scheduled_timezone") @db.VarChar(50)
+  originalLocalTime String?   @map("original_local_time") @db.VarChar(10)
+  snoozedUntil      DateTime? @map("snoozed_until") @db.Timestamptz
+
+  actorId Int? @map("actor_id")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  recipient  User                   @relation("UserNotifications", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor      User?                  @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  deliveries NotificationDelivery[]
+
+  @@index([recipientId], map: "idx_notification_recipient")
+  @@index([recipientId, isRead], map: "idx_notification_recipient_read")
+  @@index([createdAt], map: "idx_notification_created_at")
+  @@index([category], map: "idx_notification_category")
+  @@index([scheduledForUtc], map: "idx_notification_scheduled")
+  @@index([snoozedUntil], map: "idx_notification_snoozed")
+  @@index([expiresAt], map: "idx_notification_expires")
+  @@index([actorId], map: "idx_notification_actor")
+  @@index([recipientId, createdAt(sort: Desc), id(sort: Desc)], map: "idx_notification_recipient_feed")
+  @@index([entityType, entityId], map: "idx_notification_entity")
+  @@map("notifications")
+}
+
+model NotificationDelivery {
+  id             Int       @id @default(autoincrement())
+  notificationId Int       @map("notification_id")
+  channel        String    @db.VarChar(20)
+  status         String    @default("PENDING") @db.VarChar(20)
+  deliveredAt    DateTime? @map("delivered_at") @db.Timestamptz
+  failedAt       DateTime? @map("failed_at") @db.Timestamptz
+  failureReason  String?   @map("failure_reason")
+  attempt        Int       @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, channel], map: "uq_delivery_notification_channel")
+  @@index([status], map: "idx_delivery_status")
+  @@index([channel, status], map: "idx_delivery_channel_status")
+  @@map("notification_deliveries")
+}
+
+// ---------------------------------------------------------------------------
+// Case 
+// ---------------------------------------------------------------------------
+
+model Case {
+  id String @id @default(uuid())
+
+  subjectName String
+  age         Int?
+
+  incidentType String
+  incidentDate DateTime
+  caseSummary  String?
+
+  address911  String?
+  callTime911 String?
+
+  state String
+  city  String
+  zip   String?
+
+  arrestDate DateTime?
+
+  assignee   User[] @relation("UserCases")
+
+  stageId Int? @map("stage_id")
+  stage   Stages? @relation("CaseStages", fields: [stageId], references: [id])
+
+  dueDate DateTime?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  casePriority String?
+  caseSource CaseSource
+
+  priority Priority @default(MEDIUM)
+
+  @@index([subjectName(ops: raw("gin_trgm_ops"))], map: "idx_case_subject_name_trgm", type: Gin)
+  @@index([caseSummary(ops: raw("gin_trgm_ops"))], map: "idx_case_summary_trgm", type: Gin)
+}
+
+
+
+// ---------------------------------------------------------------------------
+// System
+// ---------------------------------------------------------------------------
+
+model SeedRegistry {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  hash      String
+  appliedAt DateTime @default(now()) @map("applied_at") @db.Timestamptz
+
+  @@map("seed_registry")
+}

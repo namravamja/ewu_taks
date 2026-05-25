@@ -1,0 +1,35 @@
+{
+  "name": "@mediastar/database",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@org/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "nx": {
+    "tags": [
+      "type:lib",
+      "scope:database"
+    ]
+  },
+  "dependencies": {
+    "@mediastar/core": "workspace:*",
+    "@nestjs/common": "^11.1.18",
+    "@nestjs/config": "^4.0.3",
+    "@nestjs/core": "^11.1.18",
+    "@prisma/adapter-pg": "^7.6.0",
+    "bcryptjs": "^2.4.3",
+    "lexorank": "^1.0.5",
+    "pg": "^8.19.0",
+    "reflect-metadata": "^0.2.2",
+    "tslib": "^2.3.0"
+  }
+}

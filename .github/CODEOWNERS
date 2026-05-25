@@ -1,0 +1,15 @@
+# DEFAULT REVIEWERS
+# For all application code changes, Jun Aldi and Aysenur must review.
+
+* @JunAldd @A-AKPINAR
+
+# CI/CD & INFRASTRUCTURE PROTECTION
+# Only DevOps and code reviewers can approve changes to GitHub Actions, Terraform and Dockerfiles.
+
+.github/workflows/ @tonpascual-em @ashishkumar-cz @JunAldd @A-AKPINAR
+
+# INFRASTRUCTURE AS CODE
+**/terraform/ @tonpascual-em @ashishkumar-cz @JunAldd @A-AKPINAR
+
+# CONTAINERIZATION
+**/Dockerfile @tonpascual-em @ashishkumar-cz @JunAldd @A-AKPINAR

@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebSocket Gateway Test</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+        background: #1a1a2e;
+        color: #e0e0e0;
+        padding: 20px;
+      }
+      h1 {
+        color: #7c83ff;
+        margin-bottom: 20px;
+        font-size: 1.4rem;
+      }
+      .container {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .panel {
+        background: #16213e;
+        border: 1px solid #2a2a4a;
+        border-radius: 8px;
+        padding: 16px;
+      }
+      .panel h2 {
+        font-size: 1rem;
+        color: #7c83ff;
+        margin-bottom: 12px;
+      }
+      label {
+        display: block;
+        font-size: 0.85rem;
+        color: #aaa;
+        margin-bottom: 4px;
+      }
+      input,
+      select {
+        width: 100%;
+        padding: 8px 10px;
+        margin-bottom: 10px;
+        background: #0f3460;
+        border: 1px solid #2a2a4a;
+        border-radius: 4px;
+        color: #e0e0e0;
+        font-family: inherit;
+        font-size: 0.9rem;
+      }
+      button {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-right: 8px;
+        margin-bottom: 8px;
+      }
+      .btn-primary {
+        background: #7c83ff;
+        color: #fff;
+      }
+      .btn-success {
+        background: #2ecc71;
+        color: #fff;
+      }
+      .btn-danger {
+        background: #e74c3c;
+        color: #fff;
+      }
+      .btn-secondary {
+        background: #555;
+        color: #fff;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .status {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 12px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-bottom: 12px;
+      }
+      .status-disconnected {
+        background: #e74c3c33;
+        color: #e74c3c;
+      }
+      .status-connected {
+        background: #2ecc7133;
+        color: #2ecc71;
+      }
+      .status-connecting {
+        background: #f39c1233;
+        color: #f39c12;
+      }
+      .log {
+        background: #0a0a1a;
+        border: 1px solid #2a2a4a;
+        border-radius: 4px;
+        padding: 10px;
+        height: 400px;
+        overflow-y: auto;
+        font-size: 0.8rem;
+        line-height: 1.6;
+      }
+      .log-entry {
+        border-bottom: 1px solid #1a1a2e;
+        padding: 4px 0;
+        word-break: break-all;
+      }
+      .log-time {
+        color: #666;
+      }
+      .log-in {
+        color: #2ecc71;
+      }
+      .log-out {
+        color: #3498db;
+      }
+      .log-err {
+        color: #e74c3c;
+      }
+      .log-sys {
+        color: #f39c12;
+      }
+      .token-display {
+        font-size: 0.75rem;
+        color: #666;
+        word-break: break-all;
+        max-height: 60px;
+        overflow-y: auto;
+        margin-bottom: 10px;
+        background: #0a0a1a;
+        padding: 6px;
+        border-radius: 4px;
+      }
+      .full-width {
+        grid-column: 1 / -1;
+      }
+      .inline-group {
+        display: flex;
+        gap: 8px;
+        align-items: end;
+      }
+      .inline-group > * {
+        flex: 1;
+      }
+      .inline-group > button {
+        flex: 0 0 auto;
+        margin-bottom: 10px;
+      }
+      .info-code {
+        color: #2ecc71;
+        font-family: monospace;
+      }
+      .info-text {
+        font-size: 0.85rem;
+        color: #aaa;
+        line-height: 1.8;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>WebSocket Gateway Test - /notifications</h1>
+
+    <div class="container">
+      <!-- Login Panel -->
+      <div class="panel">
+        <h2>1. Login</h2>
+        <label>API Base URL</label>
+        <input type="text" id="apiUrl" value="http://localhost:3000" />
+        <label>Email</label>
+        <input type="email" id="email" placeholder="user@example.com" />
+        <label>Password</label>
+        <input type="password" id="password" placeholder="password" />
+        <label>Or paste token directly</label>
+        <input type="text" id="manualToken" placeholder="eyJhbGciOi..." />
+        <button class="btn-primary" id="loginBtn" onclick="doLogin()">Login</button>
+        <button class="btn-secondary" onclick="useManualToken()">Use Pasted Token</button>
+        <div id="tokenDisplay" class="token-display" style="display: none"></div>
+      </div>
+
+      <!-- Connection Panel -->
+      <div class="panel">
+        <h2>2. Connect</h2>
+        <label>WebSocket URL</label>
+        <input type="text" id="wsUrl" value="http://localhost:3001" />
+        <label>Auth Method</label>
+        <select id="authMethod">
+          <option value="token">auth.token (pass JWT explicitly)</option>
+          <option value="cookie">Cookie (browser sends automatically)</option>
+        </select>
+        <span class="status status-disconnected" id="statusBadge">Disconnected</span>
+        <br />
+        <button class="btn-success" id="connectBtn" onclick="doConnect()">Connect</button>
+        <button class="btn-danger" id="disconnectBtn" onclick="doDisconnect()" disabled>
+          Disconnect
+        </button>
+      </div>
+
+      <!-- Send Panel -->
+      <div class="panel">
+        <h2>3. Send Events</h2>
+        <label>Custom Event</label>
+        <input type="text" id="customEvent" placeholder="event name" />
+        <label>Payload (JSON)</label>
+        <input type="text" id="customPayload" placeholder='{"key": "value"}' />
+        <button class="btn-secondary" id="sendCustomBtn" onclick="sendCustom()" disabled>
+          Send Custom
+        </button>
+      </div>
+
+      <!-- Info Panel -->
+      <div class="panel">
+        <h2>Listening For</h2>
+        <div class="info-text">
+          <span class="info-code">notification:new</span> - New notification pushed<br />
+          <span class="info-code">notification:unread-count</span> - Unread count update<br />
+          <span class="info-code">connect</span> / <span style="color: #e74c3c">disconnect</span> -
+          Connection lifecycle
+        </div>
+      </div>
+
+      <!-- Log Panel -->
+      <div class="panel full-width">
+        <h2>
+          Event Log
+          <button
+            class="btn-secondary"
+            onclick="clearLog()"
+            style="float: right; padding: 4px 10px; font-size: 0.75rem"
+          >
+            Clear
+          </button>
+        </h2>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+
+    <script>
+      let socket = null;
+      let accessToken = null;
+
+      function log(type, message, data) {
+        const el = document.getElementById('log');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'log-time';
+        const time = new Date().toLocaleTimeString('en-GB', {
+          hour12: false,
+          fractionalSecondDigits: 3,
+        });
+        timeSpan.textContent = '[' + time + '] ';
+
+        const msgSpan = document.createElement('span');
+        msgSpan.className = 'log-' + type;
+        msgSpan.textContent = message + (data !== undefined ? ' ' + JSON.stringify(data) : '');
+
+        entry.appendChild(timeSpan);
+        entry.appendChild(msgSpan);
+        el.appendChild(entry);
+        el.scrollTop = el.scrollHeight;
+      }
+
+      function setStatus(status) {
+        const badge = document.getElementById('statusBadge');
+        badge.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+        badge.className = 'status status-' + status;
+      }
+
+      function setConnectedUI(connected) {
+        document.getElementById('connectBtn').disabled = connected;
+        document.getElementById('disconnectBtn').disabled = !connected;
+        document.getElementById('sendCustomBtn').disabled = !connected;
+      }
+
+      function useManualToken() {
+        const token = document.getElementById('manualToken').value.trim();
+        if (!token) {
+          log('err', 'Paste a token first');
+          return;
+        }
+        accessToken = token;
+        const display = document.getElementById('tokenDisplay');
+        display.style.display = 'block';
+        display.textContent = 'Token: ' + accessToken.slice(0, 40) + '...';
+        log('sys', 'Token set manually');
+      }
+
+      async function doLogin() {
+        const apiUrl = document.getElementById('apiUrl').value.replace(/\/$/, '');
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+
+        if (!email || !password) {
+          log('err', 'Email and password required');
+          return;
+        }
+
+        log('out', 'POST ' + apiUrl + '/api/auth/login');
+        document.getElementById('loginBtn').disabled = true;
+
+        try {
+          const res = await fetch(apiUrl + '/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ email, password }),
+          });
+
+          const body = await res.json();
+
+          if (!res.ok) {
+            log('err', 'Login failed: ' + res.status, body);
+            return;
+          }
+
+          if (body.requiresTwoFactor) {
+            log('sys', '2FA required - complete 2FA flow and paste the access token manually');
+            return;
+          }
+
+          // Access token is in the ewu_at cookie (httpOnly: false)
+          const cookies = document.cookie.split(';');
+          let cookieToken = null;
+          for (let i = 0; i < cookies.length; i++) {
+            const c = cookies[i].trim();
+            if (c.startsWith('ewu_at=')) {
+              cookieToken = c.substring('ewu_at='.length);
+              break;
+            }
+          }
+
+          if (cookieToken) {
+            accessToken = cookieToken;
+            log('in', 'Login successful - token extracted from cookie');
+          } else {
+            log(
+              'sys',
+              'Login successful but cookie not accessible (CORS / different origin). Paste token manually.',
+            );
+          }
+
+          if (accessToken) {
+            const display = document.getElementById('tokenDisplay');
+            display.style.display = 'block';
+            display.textContent = 'Token: ' + accessToken.slice(0, 40) + '...';
+          }
+
+          log('in', 'Login response', body);
+        } catch (err) {
+          log('err', 'Login error: ' + err.message);
+        } finally {
+          document.getElementById('loginBtn').disabled = false;
+        }
+      }
+
+      function doConnect() {
+        const wsUrl = document.getElementById('wsUrl').value.replace(/\/$/, '');
+        const authMethod = document.getElementById('authMethod').value;
+
+        const options = {
+          transports: ['websocket'],
+          reconnection: false,
+        };
+
+        if (authMethod === 'token') {
+          if (!accessToken) {
+            log('err', 'No token available. Login first or paste a token.');
+            return;
+          }
+          options.auth = { token: accessToken };
+          log('out', 'Connecting with auth.token...');
+        } else {
+          options.withCredentials = true;
+          log('out', 'Connecting with cookies...');
+        }
+
+        setStatus('connecting');
+
+        socket = io(wsUrl + '/notifications', options);
+
+        socket.on('connect', function () {
+          log('in', 'Connected! Socket ID: ' + socket.id);
+          setStatus('connected');
+          setConnectedUI(true);
+        });
+
+        socket.on('disconnect', function (reason) {
+          log('err', 'Disconnected: ' + reason);
+          setStatus('disconnected');
+          setConnectedUI(false);
+        });
+
+        socket.on('connect_error', function (err) {
+          log('err', 'Connection error: ' + err.message);
+          setStatus('disconnected');
+          setConnectedUI(false);
+        });
+
+        socket.on('notification:new', function (data) {
+          log('in', 'notification:new', data);
+        });
+
+        socket.on('notification:unread-count', function (data) {
+          log('in', 'notification:unread-count', data);
+        });
+      }
+
+      function doDisconnect() {
+        if (socket) {
+          socket.disconnect();
+          socket = null;
+          log('sys', 'Manually disconnected');
+          setStatus('disconnected');
+          setConnectedUI(false);
+        }
+      }
+
+      function sendCustom() {
+        if (!socket || !socket.connected) return;
+        var event = document.getElementById('customEvent').value;
+        if (!event) {
+          log('err', 'Event name required');
+          return;
+        }
+        var payload;
+        try {
+          var raw = document.getElementById('customPayload').value;
+          payload = raw ? JSON.parse(raw) : {};
+        } catch (e) {
+          log('err', 'Invalid JSON: ' + e.message);
+          return;
+        }
+        log('out', 'Emit ' + event, payload);
+        socket.emit(event, payload, function (response) {
+          log('in', 'Ack for ' + event, response);
+        });
+      }
+
+      function clearLog() {
+        var el = document.getElementById('log');
+        while (el.firstChild) {
+          el.removeChild(el.firstChild);
+        }
+      }
+
+      log('sys', 'Ready. Login first, then connect to WebSocket.');
+    </script>
+  </body>
+</html>

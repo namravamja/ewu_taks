@@ -1,0 +1,11 @@
+{
+  "targets": {
+    "seed": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "pnpm exec tsx libs/database/prisma/seed.ts"
+      },
+      "inputs": ["{projectRoot}/src/lib/seeders/**/*"]
+    }
+  }
+}

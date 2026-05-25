@@ -1,0 +1,52 @@
+# mkcert local HTTPS certificates (per-developer, never commit)
+*.pem
+
+# Compiled output
+node_modules/
+.pnpm-store/
+dist/
+tmp/
+out-tsc/
+*.tsbuildinfo
+
+# Nx
+.nx/
+
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.firecrawl
+.env.staging
+.env.production
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# Coverage & Logs
+coverage/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Lock files (pnpm-lock.yaml is used)
+package-lock.json
+yarn.lock
+
+# Test output
+test-output/
+
+# Misc
+/.sass-cache
+/connect.lock
+/libpeerconnection.log
+testem.log
+/typings
+
+.claude/
+.vscode/
+
+# Prisma generated client
+libs/database/src/lib/generated/

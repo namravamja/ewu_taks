@@ -1,0 +1,54 @@
+{
+  "name": "@mediastar/core",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@org/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "@org/source": "./src/lib/testing/index.ts",
+      "types": "./dist/lib/testing/index.d.ts",
+      "import": "./dist/lib/testing/index.js",
+      "default": "./dist/lib/testing/index.js"
+    },
+    "./config": {
+      "@org/source": "./src/lib/config/index.ts",
+      "types": "./dist/lib/config/index.d.ts",
+      "import": "./dist/lib/config/index.js",
+      "default": "./dist/lib/config/index.js"
+    }
+  },
+  "nx": {
+    "tags": [
+      "type:lib",
+      "scope:core"
+    ]
+  },
+  "dependencies": {
+    "tslib": "^2.3.0",
+    "reflect-metadata": "^0.2.2",
+    "@nestjs/common": "^11.1.18",
+    "@nestjs/config": "^4.0.3",
+    "@nestjs/core": "^11.1.18",
+    "@prisma/client": "^7.6.0",
+    "class-validator": "^0.15.1",
+    "express": "^5.0.0",
+    "ioredis": "^5.10.0",
+    "zod": "^4.3.6",
+    "@nestjs/throttler": "^6.5.0",
+    "rxjs": "^7.8.0",
+    "geoip-lite": "^1.4.10",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0"
+  }
+}

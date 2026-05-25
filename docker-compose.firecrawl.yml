@@ -1,0 +1,194 @@
+# Firecrawl Self-Hosted Stack — Staging v3
+# Deploy: docker compose -f docker-compose.firecrawl.yml --env-file .env.firecrawl up -d
+# Teardown (keep data): docker compose -f docker-compose.firecrawl.yml down
+# Teardown (wipe data): docker compose -f docker-compose.firecrawl.yml down -v
+
+networks:
+  firecrawl:
+    driver: bridge
+    name: firecrawl
+
+volumes:
+  firecrawl-pgdata:
+    name: firecrawl-pgdata
+
+services:
+  # ─────────────────────────────────────────────
+  # 1. PostgreSQL — NUQ job queue tables
+  #    POSTGRES_DB MUST be "postgres" (pg_cron hardcoded)
+  # ─────────────────────────────────────────────
+  firecrawl-postgres:
+    image: ghcr.io/firecrawl/nuq-postgres:latest
+    container_name: firecrawl-postgres
+    restart: unless-stopped
+    networks:
+      - firecrawl
+    ports:
+      - '5433:5432' # host 5433 → container 5432 (avoids conflict with app postgres on 5432)
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres # MUST be "postgres" — do NOT change
+    volumes:
+      - firecrawl-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres} -d postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+        compress: 'true'
+
+  # ─────────────────────────────────────────────
+  # 2. Redis — Job queue + rate-limit cache
+  #    Separate from app Redis (no port conflict — not exposed)
+  # ─────────────────────────────────────────────
+  firecrawl-redis:
+    image: redis:alpine
+    container_name: firecrawl-redis
+    restart: unless-stopped
+    networks:
+      - firecrawl
+    # No host port mapping — only reachable inside firecrawl network
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+        compress: 'true'
+
+  # ─────────────────────────────────────────────
+  # 3. RabbitMQ — Message broker for job delivery
+  # ─────────────────────────────────────────────
+  firecrawl-rabbitmq:
+    image: rabbitmq:3-management
+    container_name: firecrawl-rabbitmq
+    restart: unless-stopped
+    networks:
+      - firecrawl
+    ports:
+      - '5672:5672' # AMQP (internal only — bind to localhost below if needed)
+      - '15672:15672' # RabbitMQ management UI (restrict access in staging firewall)
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-firecrawl}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', 'check_running']
+      interval: 5s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+        compress: 'true'
+
+  # ─────────────────────────────────────────────
+  # 4. Playwright — Headless Chromium for JS pages
+  # ─────────────────────────────────────────────
+  firecrawl-playwright:
+    image: ghcr.io/firecrawl/playwright-service:latest
+    container_name: firecrawl-playwright
+    restart: unless-stopped
+    networks:
+      - firecrawl
+    # No host port — only firecrawl-api calls this on port 3000
+    environment:
+      PORT: 3000
+    tmpfs:
+      - /tmp:size=1g # 1 GB tmpfs for Chromium temp files
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 2g
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: ${AWS_LOG_GROUP:-/firecrawl/staging}
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-stream-prefix: firecrawl-playwright
+        awslogs-create-group: 'true'
+
+  # ─────────────────────────────────────────────
+  # 5. Firecrawl API — Main API + workers
+  #    Depends on all other services being healthy
+  # ─────────────────────────────────────────────
+  firecrawl-api:
+    image: ghcr.io/firecrawl/firecrawl:latest
+    container_name: firecrawl-api
+    restart: unless-stopped
+    networks:
+      - firecrawl
+    ports:
+      - '3002:3002' # Internal only — do NOT open to public internet
+    depends_on:
+      firecrawl-postgres:
+        condition: service_healthy
+      firecrawl-redis:
+        condition: service_healthy
+      firecrawl-rabbitmq:
+        condition: service_healthy
+      firecrawl-playwright:
+        condition: service_started
+    environment:
+      # ── Server ──
+      PORT: 3002
+      HOST: 0.0.0.0
+      LOGGING_LEVEL: ${LOGGING_LEVEL:-info}
+
+      # ── Database ──
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: postgres # MUST be "postgres"
+      POSTGRES_HOST: firecrawl-postgres
+
+      # ── Redis ──
+      REDIS_URL: redis://firecrawl-redis:6379
+      REDIS_RATE_LIMIT_URL: redis://firecrawl-redis:6379
+
+      # ── RabbitMQ ──
+      NUQ_RABBITMQ_URL: amqp://${RABBITMQ_USER:-firecrawl}:${RABBITMQ_PASSWORD}@firecrawl-rabbitmq:5672
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-firecrawl}:${RABBITMQ_PASSWORD}@firecrawl-rabbitmq:5672
+
+      # ── Playwright ──
+      PLAYWRIGHT_MICROSERVICE_URL: http://firecrawl-playwright:3000
+
+      # ── Auth (disabled — security via network isolation) ──
+      USE_DB_AUTHENTICATION: 'false'
+
+      # ── Performance (tuned for staging) ──
+      NUM_WORKERS_PER_QUEUE: ${NUM_WORKERS_PER_QUEUE:-2}
+      CRAWL_CONCURRENT_REQUESTS: ${CRAWL_CONCURRENT_REQUESTS:-3}
+      MAX_CONCURRENT_JOBS: ${MAX_CONCURRENT_JOBS:-5}
+      BROWSER_POOL_SIZE: ${BROWSER_POOL_SIZE:-3}
+
+      # ── Bull Admin Dashboard ──
+      BULL_AUTH_KEY: ${BULL_AUTH_KEY}
+
+      # ── Test key for dev/staging ──
+      TEST_API_KEY: ${TEST_API_KEY}
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4g
+    logging:
+      driver: awslogs
+      options:
+        awslogs-group: ${AWS_LOG_GROUP:-/firecrawl/staging}
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-stream-prefix: firecrawl-api
+        awslogs-create-group: 'true'
