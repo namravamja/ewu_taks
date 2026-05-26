@@ -142,7 +142,6 @@ export class CaseRepository {
 
       if (property === 'caseSource') {
         displayCase.caseSource = caseRecord.caseSource;
-
       }
 
       if (property === 'createdAt') {
@@ -164,9 +163,7 @@ export class CaseRepository {
     }) as Promise<ICaseMutationResult | null>;
   }
 
-  public async findMany(
-    query: CasesQueryDTO,
-  ): Promise<[ICaseMutationResult[], number]> {
+  public async findMany(query: CasesQueryDTO): Promise<[ICaseMutationResult[], number]> {
     const { skip, take } = buildPaginationArgs(query);
     const where = buildCasesWhere(query);
 
@@ -191,7 +188,9 @@ export class CaseRepository {
     const caseLimit = query.caseLimit ?? take;
     const displayProperties = query.displayPropertiesFilter?.length
       ? query.displayPropertiesFilter
-      : CASE_DISPLAY_PROPERTIES.filter((property) => property.selected).map((property) => property.key);
+      : CASE_DISPLAY_PROPERTIES.filter((property) => property.selected).map(
+          (property) => property.key,
+        );
 
     const where = this.filterQueryBuilder.buildCaseWhere(query);
 
@@ -240,6 +239,47 @@ export class CaseRepository {
     ];
   }
 
+  public async findLocationFilterOptions(
+    field: 'city' | 'state',
+    search?: string,
+    limit = 20,
+  ): Promise<Array<{ id: string; name: string }>> {
+    const normalizedSearch = search?.trim();
+
+    const where: Prisma.CaseWhereInput = {
+      [field]: {
+        notIn: [''],
+        ...(normalizedSearch && {
+          contains: normalizedSearch,
+          mode: 'insensitive',
+        }),
+      },
+    };
+
+    const locations =
+      field === 'city'
+        ? await this.db.case.groupBy({
+            by: ['city'],
+            where,
+            orderBy: { city: 'asc' },
+            take: limit,
+          })
+        : await this.db.case.groupBy({
+            by: ['state'],
+            where,
+            orderBy: { state: 'asc' },
+            take: limit,
+          });
+
+    return locations
+      .map((location) => location[field])
+      .filter((location): location is string => typeof location === 'string' && location.length > 0)
+      .map((location) => ({
+        id: location,
+        name: location,
+      }));
+  }
+
   public async stageExists(stageId: number): Promise<boolean> {
     const stage = await this.db.stages.findUnique({
       where: { id: stageId },
@@ -250,15 +290,21 @@ export class CaseRepository {
   }
 
   public async moveCaseToStage(caseId: string, stageId: number): Promise<ICaseMutationResult> {
-    const oldCase = await this.db.case.findUnique({ where: { id: caseId }, select: { stageId: true } });
+    const oldCase = await this.db.case.findUnique({
+      where: { id: caseId },
+      select: { stageId: true },
+    });
     if (oldCase?.stageId && oldCase.stageId !== stageId) {
       await this.db.$transaction([
-        this.db.stages.update({ where: { id: oldCase.stageId }, data: { caseCount: { decrement: 1 } } }),
+        this.db.stages.update({
+          where: { id: oldCase.stageId },
+          data: { caseCount: { decrement: 1 } },
+        }),
         this.db.stages.update({ where: { id: stageId }, data: { caseCount: { increment: 1 } } }),
         this.db.case.update({
           where: { id: caseId },
           data: { stageId },
-        })
+        }),
       ]);
     } else if (!oldCase?.stageId) {
       await this.db.$transaction([
@@ -266,7 +312,7 @@ export class CaseRepository {
         this.db.case.update({
           where: { id: caseId },
           data: { stageId },
-        })
+        }),
       ]);
     }
     return this.findById(caseId) as Promise<ICaseMutationResult>;
@@ -374,7 +420,7 @@ export class CaseRepository {
       }
     }
 
-    const updatedCase = await this.db.case.update({
+    const updatedCase = (await this.db.case.update({
       where: { id },
       data: {
         ...(params.subjectName !== undefined && { subjectName: params.subjectName }),
@@ -399,14 +445,20 @@ export class CaseRepository {
             : { stage: { connect: { id: params.stageId } } })),
       },
       select: CASE_MUTATION_SELECT,
-    }) as unknown as ICaseMutationResult;
+    })) as unknown as ICaseMutationResult;
 
     if (oldCase && oldCase.stageId !== updatedCase.stageId) {
       if (oldCase.stageId) {
-        await this.db.stages.update({ where: { id: oldCase.stageId }, data: { caseCount: { decrement: 1 } } });
+        await this.db.stages.update({
+          where: { id: oldCase.stageId },
+          data: { caseCount: { decrement: 1 } },
+        });
       }
       if (updatedCase.stageId) {
-        await this.db.stages.update({ where: { id: updatedCase.stageId }, data: { caseCount: { increment: 1 } } });
+        await this.db.stages.update({
+          where: { id: updatedCase.stageId },
+          data: { caseCount: { increment: 1 } },
+        });
       }
       return this.findById(id) as Promise<ICaseMutationResult>;
     }
@@ -415,10 +467,10 @@ export class CaseRepository {
   }
 
   public async delete(id: string): Promise<ICaseMutationResult> {
-    const deletedCase = await this.db.case.delete({
+    const deletedCase = (await this.db.case.delete({
       where: { id },
       select: CASE_MUTATION_SELECT,
-    }) as unknown as ICaseMutationResult;
+    })) as unknown as ICaseMutationResult;
     if (deletedCase.stageId) {
       await this.db.stages.update({
         where: { id: deletedCase.stageId },
@@ -437,7 +489,6 @@ export class CaseRepository {
       return undefined;
     }
 
-    return {
-    };
+    return {};
   }
 }

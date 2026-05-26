@@ -1,6 +1,7 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 
 import { CreateFilterDTO, buildFilterConfigResponse } from './dtos';
+import { FilterDataSourceRegistry } from './filter-datasource.registry';
 import type { IFilterConfigResponse, IFilterMutationResult } from './interfaces/filter.interface';
 import { FilterRepository } from './filter.repository';
 
@@ -8,12 +9,20 @@ const FILTER_NOT_FOUND = 'Filter not found';
 
 @Injectable()
 export class FilterService {
-  constructor(private readonly filterRepository: FilterRepository) {}
+  constructor(
+    private readonly filterRepository: FilterRepository,
+    private readonly filterDataSourceRegistry: FilterDataSourceRegistry,
+  ) {}
 
   async getFilters(): Promise<IFilterConfigResponse[]> {
     const filters = await this.filterRepository.getFilters();
 
-    return filters.map((filter) => buildFilterConfigResponse(filter));
+    return filters.map((filter) =>
+      buildFilterConfigResponse(
+        filter,
+        this.filterDataSourceRegistry.resolve(filter.field, filter.dataSource),
+      ),
+    );
   }
 
   async create(dto: CreateFilterDTO): Promise<IFilterMutationResult> {

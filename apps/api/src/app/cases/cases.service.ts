@@ -53,6 +53,13 @@ export class CasesService {
     return this.caseRepository.displayPropertiesFilter();
   }
 
+  async getLocationFilterOptions(
+    field: 'city' | 'state',
+    query: { search?: string; limit?: number },
+  ): Promise<Array<{ id: string; name: string }>> {
+    return this.caseRepository.findLocationFilterOptions(field, query.search, query.limit ?? 20);
+  }
+
   async create(dto: CreateCaseDTO): Promise<ICaseMutationResult> {
     return this.caseRepository.create(dto);
   }

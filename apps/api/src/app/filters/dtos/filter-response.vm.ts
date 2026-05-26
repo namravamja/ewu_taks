@@ -1,6 +1,7 @@
 import { FilterType } from '@mediastar/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
+import type { IFilterDataSourceResponse } from '../interfaces/filter-datasource.interface';
 import type { IFilterConfigResponse, IFilterMutationResult } from '../interfaces/filter.interface';
 
 type FilterDependencyMap = Record<string, unknown>;
@@ -13,57 +14,6 @@ const MULTI_SELECT_OPERATORS = ['containsAny', 'containsAll', 'notContainsAny', 
 const BOOLEAN_OPERATORS = ['isTrue', 'isFalse'];
 const RELATION_OPERATORS = ['exists', 'notExists', 'equals', 'notEquals', 'in', 'notIn'];
 
-const TEXT_DEPENDENCIES: FilterDependencyMap = {
-  ranges: false,
-  presets: ['contains', 'startsWith', 'endsWith'],
-  within: true,
-};
-
-const NUMBER_DEPENDENCIES: FilterDependencyMap = {
-  ranges: true,
-  presets: ['equals', 'between', 'greaterThan', 'lessThan'],
-  min: null,
-  max: null,
-};
-
-const DATE_DEPENDENCIES: FilterDependencyMap = {
-  ranges: true,
-  presets: ['today', 'yesterday', 'thisWeek', 'thisMonth', 'last7Days'],
-  beforeAfter: true,
-  within: true,
-};
-
-const SELECT_DEPENDENCIES: FilterDependencyMap = {
-  options: [],
-  enumOptions: true,
-  liveDataSource: null,
-  multiSelect: false,
-};
-
-const MULTI_SELECT_DEPENDENCIES: FilterDependencyMap = {
-  options: [],
-  enumOptions: true,
-  liveDataSource: null,
-  multiSelect: true,
-};
-
-const BOOLEAN_DEPENDENCIES: FilterDependencyMap = {
-  options: [
-    { label: 'Yes', value: true },
-    { label: 'No', value: false },
-  ],
-};
-
-const RELATION_DEPENDENCIES: FilterDependencyMap = {
-  liveDataSource: null,
-  relation: true,
-  multiSelect: true,
-};
-
-function cloneDependencies(base: FilterDependencyMap): FilterDependencyMap {
-  return JSON.parse(JSON.stringify(base)) as FilterDependencyMap;
-}
-
 export function buildFilterConfigResponse(filter: {
   field: string;
   label: string;
@@ -71,11 +21,10 @@ export function buildFilterConfigResponse(filter: {
   operators: unknown | null;
   dependencies: unknown | null;
   isMulti: boolean;
-  dataSource: string | null;
-}): IFilterConfigResponse {
+}, dataSource: IFilterDataSourceResponse | null): IFilterConfigResponse {
   const type = resolveFilterType(filter.type, filter.isMulti);
   const operators = resolveOperators(type, filter.operators);
-  const dependencies = resolveDependencies(type, filter.dependencies, filter.dataSource, filter.isMulti);
+  const dependencies = resolveDependencies(filter.dependencies);
 
   return {
     field: filter.field,
@@ -83,6 +32,7 @@ export function buildFilterConfigResponse(filter: {
     type,
     operators,
     dependencies,
+    dataSource,
   };
 }
 
@@ -120,47 +70,13 @@ function resolveOperators(type: FilterType, operators: unknown): string[] {
 }
 
 function resolveDependencies(
-  type: FilterType,
   dependencies: unknown,
-  dataSource: string | null,
-  isMulti: boolean,
 ): FilterDependencyMap {
-  const resolved = cloneDependencies(getDependencyTemplate(type));
-
-  if (isPlainObject(dependencies)) {
-    Object.assign(resolved, dependencies);
+  if (!isPlainObject(dependencies)) {
+    return {};
   }
 
-  if (dataSource) {
-    resolved['liveDataSource'] = dataSource;
-  }
-
-  if (type === FilterType.SELECT || type === FilterType.MULTI_SELECT || type === FilterType.RELATION) {
-    resolved['multiSelect'] = isMulti || type === FilterType.MULTI_SELECT || type === FilterType.RELATION;
-  }
-
-  return resolved;
-}
-
-function getDependencyTemplate(type: FilterType): FilterDependencyMap {
-  switch (type) {
-    case FilterType.TEXT:
-      return TEXT_DEPENDENCIES;
-    case FilterType.NUMBER:
-      return NUMBER_DEPENDENCIES;
-    case FilterType.DATE:
-      return DATE_DEPENDENCIES;
-    case FilterType.SELECT:
-      return SELECT_DEPENDENCIES;
-    case FilterType.MULTI_SELECT:
-      return MULTI_SELECT_DEPENDENCIES;
-    case FilterType.BOOLEAN:
-      return BOOLEAN_DEPENDENCIES;
-    case FilterType.RELATION:
-      return RELATION_DEPENDENCIES;
-    default:
-      return {};
-  }
+  return JSON.parse(JSON.stringify(dependencies)) as FilterDependencyMap;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -186,6 +102,14 @@ export class FilterConfigVM implements IFilterConfigResponse {
     additionalProperties: true,
   })
   dependencies!: FilterDependencyMap;
+
+  @ApiPropertyOptional({
+    description: 'Optional live datasource descriptor for UI option loading',
+    type: 'object',
+    additionalProperties: true,
+    nullable: true,
+  })
+  dataSource!: IFilterDataSourceResponse | null;
 }
 
 export class FilterMutationResultVM implements IFilterMutationResult {

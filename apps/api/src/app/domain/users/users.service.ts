@@ -43,6 +43,8 @@ import {
   UnrejectUserDTO,
   UpdateAuthProviderDTO,
   UpdateUserDTO,
+  UserFilterOptionsQueryDTO,
+  UserFilterOptionVM,
   UserResponseVM,
   UsersQueryDTO,
 } from './dtos';
@@ -153,13 +155,8 @@ export class UsersService {
     );
   }
 
-  async getFilterOptions(
-    search?: string,
-    limit = 20,
-    cursorId?: number,
-    includeInactive = false,
-  ): Promise<{ value: number; label: string }[]> {
-    return this.userRepository.findFilterOptions(search, limit, cursorId, includeInactive);
+  async getFilterOptions(query: UserFilterOptionsQueryDTO): Promise<UserFilterOptionVM[]> {
+    return this.userRepository.findFilterOptions(query.search, query.limit ?? 20);
   }
 
   async softDelete(id: number, deletedBy: number): Promise<void> {

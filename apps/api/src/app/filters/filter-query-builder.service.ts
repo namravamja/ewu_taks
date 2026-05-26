@@ -119,7 +119,7 @@ export class FilterQueryBuilderService {
     field: 'subjectName' | 'incidentType' | 'state' | 'city' | 'casePriority',
     filter: ICaseFilterCondition,
   ): Prisma.CaseWhereInput | undefined {
-    const value = this.toTrimmedString(filter.value);
+    const value = this.toTrimmedString(filter.value) ?? this.toTrimmedString(filter.values?.[0]);
     if (value === undefined && filter.operator !== FilterOperator.IS_EMPTY && filter.operator !== FilterOperator.IS_NOT_EMPTY) {
       return undefined;
     }
@@ -148,7 +148,7 @@ export class FilterQueryBuilderService {
     field: 'caseSummary' | 'address911' | 'callTime911' | 'zip',
     filter: ICaseFilterCondition,
   ): Prisma.CaseWhereInput | undefined {
-    const value = this.toTrimmedString(filter.value);
+    const value = this.toTrimmedString(filter.value) ?? this.toTrimmedString(filter.values?.[0]);
     if (value === undefined && filter.operator !== FilterOperator.IS_EMPTY && filter.operator !== FilterOperator.IS_NOT_EMPTY) {
       return undefined;
     }
@@ -177,8 +177,8 @@ export class FilterQueryBuilderService {
     field: 'age' | 'stageId',
     filter: ICaseFilterCondition,
   ): Prisma.CaseWhereInput | undefined {
-    const numericValue = this.toNumber(filter.value);
-    const numericValues = this.toNumberArray(filter.values);
+    const numericValue = this.toNumber(filter.value) ?? this.toNumber(filter.values?.[0]);
+    const numericValues = this.toNumberArray(filter.values ?? filter.value);
 
     switch (filter.operator) {
       case FilterOperator.EQUALS:
@@ -217,8 +217,8 @@ export class FilterQueryBuilderService {
     field: 'incidentDate' | 'createdAt' | 'updatedAt' | 'arrestDate' | 'dueDate',
     filter: ICaseFilterCondition,
   ): Prisma.CaseWhereInput | undefined {
-    const dateValue = this.toDate(filter.value);
-    const dateValues = this.toDateArray(filter.values);
+    const dateValue = this.toDate(filter.value) ?? this.toDate(filter.values?.[0]);
+    const dateValues = this.toDateArray(filter.values ?? filter.value);
 
     switch (filter.operator) {
       case FilterOperator.EQUALS:
@@ -262,15 +262,27 @@ export class FilterQueryBuilderService {
       return undefined;
     }
 
-    if (filter.operator === FilterOperator.NOT_IN) {
-      return { [field]: { notIn: values } } as Prisma.CaseWhereInput;
-    }
+    const uniqueValues = [...new Set(values)];
 
-    return { [field]: { in: values } } as Prisma.CaseWhereInput;
+    switch (filter.operator) {
+      case FilterOperator.NOT_EQUALS:
+      case FilterOperator.NOT_IN:
+      case FilterOperator.NOT_CONTAINS_ANY:
+      case FilterOperator.NOT_CONTAINS_ALL:
+        return { [field]: { notIn: uniqueValues } } as Prisma.CaseWhereInput;
+      case FilterOperator.EQUALS:
+      case FilterOperator.IN:
+      case FilterOperator.CONTAINS:
+      case FilterOperator.CONTAINS_ANY:
+      case FilterOperator.CONTAINS_ALL:
+        return { [field]: { in: uniqueValues } } as Prisma.CaseWhereInput;
+      default:
+        return undefined;
+    }
   }
 
   private buildAssigneeCondition(filter: ICaseFilterCondition): Prisma.CaseWhereInput | undefined {
-    const values = this.toNumberArray(filter.values ?? filter.value);
+    const values = [...new Set(this.toNumberArray(filter.values ?? filter.value))];
     if (values.length === 0) {
       return undefined;
     }
@@ -280,16 +292,20 @@ export class FilterQueryBuilderService {
         return { assignee: { some: {} } };
       case FilterOperator.NOT_EXISTS:
         return { assignee: { none: {} } };
+      case FilterOperator.EQUALS:
+      case FilterOperator.IN:
+      case FilterOperator.CONTAINS_ANY:
+        return { assignee: { some: { id: { in: values } } } };
       case FilterOperator.NOT_IN:
+      case FilterOperator.NOT_EQUALS:
+      case FilterOperator.NOT_CONTAINS_ANY:
         return { assignee: { none: { id: { in: values } } } };
       case FilterOperator.CONTAINS_ALL:
         return { AND: values.map((assigneeId) => ({ assignee: { some: { id: assigneeId } } })) };
       case FilterOperator.NOT_CONTAINS_ALL:
         return { OR: values.map((assigneeId) => ({ assignee: { none: { id: assigneeId } } })) };
-      case FilterOperator.CONTAINS_ANY:
-      case FilterOperator.IN:
       default:
-        return { assignee: { some: { id: { in: values } } } };
+        return undefined;
     }
   }
 

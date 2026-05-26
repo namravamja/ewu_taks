@@ -70,6 +70,17 @@ function buildNameSearch(search: string): Prisma.UserWhereInput[] {
   }));
 }
 
+function buildFilterOptionSearch(search: string): Prisma.UserWhereInput[] {
+  const terms = search.trim().split(/\s+/).filter(Boolean);
+  return terms.map((term) => ({
+    OR: [
+      { firstName: { contains: term, mode: 'insensitive' as const } },
+      { lastName: { contains: term, mode: 'insensitive' as const } },
+      { email: { contains: term, mode: 'insensitive' as const } },
+    ],
+  }));
+}
+
 const _USER_LITE_SELECT = {
   id: true,
   firstName: true,
@@ -120,26 +131,20 @@ function buildUsersWhere(query: UsersQueryDTO): Prisma.UserWhereInput {
 export class UsersRepository {
   constructor(private readonly db: DatabaseService) {}
 
-  async findFilterOptions(
-    search: string | undefined,
-    limit: number,
-    cursorId?: number,
-    includeInactive = false,
-  ): Promise<{ value: number; label: string }[]> {
-    const where: Prisma.UserWhereInput = includeInactive ? {} : { status: UserStatus.ACTIVE };
+  async findFilterOptions(search: string | undefined, limit: number): Promise<{ id: number; name: string }[]> {
+    const where: Prisma.UserWhereInput = { status: UserStatus.ACTIVE };
     if (search) {
-      where.AND = buildNameSearch(search);
+      where.AND = buildFilterOptionSearch(search);
     }
     const users = await this.db.user.findMany({
       where,
       select: POPULATED_USER_SELECT,
-      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }],
-      take: limit + 1,
-      ...(cursorId != null && { skip: 1, cursor: { id: cursorId } }),
+      orderBy: [{ firstName: 'asc' }, { lastName: 'asc' }, { id: 'asc' }],
+      take: limit,
     });
     return users.map((u) => ({
-      value: u.id,
-      label: [u.firstName, u.lastName].filter(Boolean).join(' ') || `User ${u.id}`,
+      id: u.id,
+      name: [u.firstName, u.lastName].filter(Boolean).join(' ') || u.email || `User ${u.id}`,
     }));
   }
 

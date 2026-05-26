@@ -8,6 +8,8 @@ export * from './trash-users-query.dto';
 export * from './two-factor-enforcement.dto';
 export * from './two-factor-enforcement-result.vm';
 export * from './unreject-user.dto';
+export * from './user-filter-option.vm';
+export * from './user-filter-options-query.dto';
 export * from './update-auth-provider.dto';
 export * from './update-user.dto';
 export * from './user-response.vm';

@@ -38,6 +38,7 @@ import {
   HttpStatus,
   Param,
   ParseIntPipe,
+  Query,
   Patch,
   Post,
 } from '@nestjs/common';
@@ -50,6 +51,8 @@ import {
   DeletedUserResponseVM,
   ReactivateUserDTO,
   RejectUserDTO,
+  UserFilterOptionsQueryDTO,
+  UserFilterOptionVM,
   TrashUsersQueryDTO,
   TwoFactorEnforcementDTO,
   TwoFactorEnforcementResultVM,
@@ -81,6 +84,18 @@ export class UsersController {
   @ApiWrappedResponse({ type: UserResponseVM, isArray: true, description: 'Paginated user list' })
   listUsers(@Body() query: UsersQueryDTO): Promise<OffsetPaginatedResultVM<UserResponseVM>> {
     return this.usersService.listUsers(query);
+  }
+
+  @Get('filter-options')
+  @Permissions(perm(M.Users, A.Read))
+  @ApiOperation({ summary: 'Search assignees for dynamic filters' })
+  @ApiWrappedResponse({
+    type: UserFilterOptionVM,
+    isArray: true,
+    description: 'Assignee options for live filter dropdowns',
+  })
+  getFilterOptions(@Query() query: UserFilterOptionsQueryDTO): Promise<UserFilterOptionVM[]> {
+    return this.usersService.getFilterOptions(query);
   }
 
   @Get('two-factor/stats')

@@ -19,7 +19,14 @@ import {
 } from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 
-import { CasesQueryDTO, CreateCaseDTO, DragCaseDTO, UpdateCaseDTO } from './dtos';
+import {
+  CaseLocationFilterOptionsQueryDTO,
+  CaseLocationFilterOptionVM,
+  CasesQueryDTO,
+  CreateCaseDTO,
+  DragCaseDTO,
+  UpdateCaseDTO,
+} from './dtos';
 import { CasesService } from './cases.service';
 import {
   ICaseDisplayProperty,
@@ -99,6 +106,32 @@ export class CasesController {
       throw new BadRequestException('stageId is required in request body');
     }
     return this.casesService.getCasesByStage(query.stageId, query);
+  }
+
+  @Get('filter-options/city')
+  @ApiOperation({ summary: 'Search distinct case cities for dynamic filters' })
+  @ApiWrappedResponse({
+    type: CaseLocationFilterOptionVM,
+    isArray: true,
+    description: 'City options sourced from existing case records',
+  })
+  getCityFilterOptions(
+    @Query() query: CaseLocationFilterOptionsQueryDTO,
+  ): Promise<CaseLocationFilterOptionVM[]> {
+    return this.casesService.getLocationFilterOptions('city', query);
+  }
+
+  @Get('filter-options/state')
+  @ApiOperation({ summary: 'Search distinct case states for dynamic filters' })
+  @ApiWrappedResponse({
+    type: CaseLocationFilterOptionVM,
+    isArray: true,
+    description: 'State options sourced from existing case records',
+  })
+  getStateFilterOptions(
+    @Query() query: CaseLocationFilterOptionsQueryDTO,
+  ): Promise<CaseLocationFilterOptionVM[]> {
+    return this.casesService.getLocationFilterOptions('state', query);
   }
 
   @Post('search')
