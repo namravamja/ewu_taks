@@ -5,7 +5,6 @@ import { DatabaseModule } from '@mediastar/database';
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-
 import { AuditModule } from '../audit/audit.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -18,6 +17,7 @@ import { StageModule } from './stages/stage.module';
 import { InvitationsModule } from './domain/users/invitations/invitations.module';
 import { UsersModule } from './domain/users/users.module';
 import { CasesModule } from './cases/cases.module';
+import { FilterModule } from './filters/filter.module';
 
 @Module({
   imports: [
@@ -36,6 +36,7 @@ import { CasesModule } from './cases/cases.module';
     RolesModule,
     StageModule,
     CasesModule,
+    FilterModule,
   ],
   controllers: [AppController],
   providers: [

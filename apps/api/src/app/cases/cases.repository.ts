@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { buildPaginationArgs } from '@mediastar/shared';
 import { DatabaseService, Prisma } from '@mediastar/database';
+import { FilterQueryBuilderService } from '../filters/filter-query-builder.service';
 import { type CasesQueryDTO } from './dtos';
 import {
   CASE_DISPLAY_PROPERTIES,
@@ -61,7 +62,10 @@ const DEFAULT_STAGE_TITLE = 'New';
 
 @Injectable()
 export class CaseRepository {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly filterQueryBuilder: FilterQueryBuilderService,
+  ) {}
 
   private toDisplayCase(
     caseRecord: ICaseMutationResult,
@@ -189,6 +193,8 @@ export class CaseRepository {
       ? query.displayPropertiesFilter
       : CASE_DISPLAY_PROPERTIES.filter((property) => property.selected).map((property) => property.key);
 
+    const where = this.filterQueryBuilder.buildCaseWhere(query);
+
     const [stagesWithCases, total, stageCounts] = await Promise.all([
       this.db.stages.findMany({
         select: {
@@ -198,7 +204,8 @@ export class CaseRepository {
           case: {
             select: CASE_MUTATION_SELECT,
             take: caseLimit,
-            where: buildCasesWhere(query),
+            // where: buildCasesWhere(query),
+            where,
             orderBy: buildCasesOrderBy(query.orderBy, query.sort ?? 'desc'),
           },
         },
@@ -209,7 +216,7 @@ export class CaseRepository {
       this.db.stages.count(),
       this.db.case.groupBy({
         by: ['stageId'],
-        where: buildCasesWhere(query),
+        where,
         _count: {
           _all: true,
         },

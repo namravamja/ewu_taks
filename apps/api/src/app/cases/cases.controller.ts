@@ -92,7 +92,9 @@ export class CasesController {
       required: ['data', 'total', 'page', 'limit', 'totalPages'],
     },
   })
-  getCasesByStage(@Body() query: CasesQueryDTO): Promise<OffsetPaginatedResultVM<ICaseMutationResult>> {
+  getCasesByStage(
+    @Body() query: CasesQueryDTO,
+  ): Promise<OffsetPaginatedResultVM<ICaseMutationResult>> {
     if (query.stageId == null) {
       throw new BadRequestException('stageId is required in request body');
     }
@@ -161,9 +163,7 @@ export class CasesController {
   })
   searchCases(
     @Body() query: CasesQueryDTO,
-  ): Promise<
-    OffsetPaginatedResultVM<IGroupedCasesByStage>
-  > {
+  ): Promise<OffsetPaginatedResultVM<IGroupedCasesByStage>> {
     return this.casesService.searchCases(query);
   }
 
@@ -178,14 +178,15 @@ export class CasesController {
           page: 1,
           limit: 10,
           sort: 'desc',
-          orderBy: 'created',
-          caseLimit: 5,
-          stageId: 2,
-          createdAtFrom: '2026-01-01T00:00:00.000Z',
-          createdAtTo: '2026-01-31T23:59:59.999Z',
-          caseSource: ['PR_TEAM'],
-          priority: ['HIGH', 'MEDIUM'],
-          assigneeIds: [3, 7],
+          filters: [
+            { field: 'caseSource', operator: 'in', values: ['PR_TEAM'] },
+            { field: 'assigneeIds', operator: 'containsAny', values: [3, 7] },
+            {
+              field: 'createdAt',
+              operator: 'between',
+              values: ['2026-01-01T00:00:00.000Z', '2026-01-31T23:59:59.999Z'],
+            },
+          ],
           displayPropertiesFilter: [
             'id',
             'subjectName',
@@ -237,9 +238,7 @@ export class CasesController {
   })
   getAllByStages(
     @Body() query: CasesQueryDTO,
-  ): Promise<
-    OffsetPaginatedResultVM<IGroupedCasesByStage>
-  > {
+  ): Promise<OffsetPaginatedResultVM<IGroupedCasesByStage>> {
     return this.casesService.getAllCasesByAllStages(query);
   }
 

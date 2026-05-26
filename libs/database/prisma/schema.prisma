@@ -84,6 +84,16 @@ enum Priority {
   @@map("priority")
 }
 
+enum FilterType {
+  TEXT
+  NUMBER
+  DATE
+  SELECT
+  MULTI_SELECT
+  BOOLEAN
+  RELATION
+}
+
 // ---------------------------------------------------------------------------
 // Auth & Authorization
 // ---------------------------------------------------------------------------
@@ -521,6 +531,26 @@ model Case {
   @@index([caseSummary(ops: raw("gin_trgm_ops"))], map: "idx_case_summary_trgm", type: Gin)
 }
 
+model Filter {
+  id              Int       @id @default(autoincrement())
+
+  field           String    @unique
+  label           String
+  type            FilterType
+
+  operators       Json?
+  dependencies    Json?
+
+  isMulti         Boolean   @default(false)
+  isRequired      Boolean   @default(false)
+  isActive        Boolean   @default(true)
+
+  dataSource      String?
+  placeholder     String?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
 
 
 // ---------------------------------------------------------------------------

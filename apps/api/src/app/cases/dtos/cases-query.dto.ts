@@ -2,9 +2,10 @@ import { OffsetPaginationDTO } from '@mediastar/shared';
 import { PAGINATION_DEFAULTS } from '@mediastar/core';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsArray, IsDate, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsArray, IsDate, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 
 import { CaseSource, Priority } from '../../../../../../../ewu_task/libs/database/src/lib/generated/prisma/client';
+import { FilterConditionDTO } from '../../filters/dtos/filter-condition.dto';
 
 import { CASE_DISPLAY_PROPERTIES, type CaseDisplayPropertyKey } from '../interfaces/case.interface';
 import { CASE_ORDER_BY_FIELDS, type CaseOrderByField } from '../utils/cases-order.util';
@@ -105,6 +106,16 @@ export class CasesQueryDTO extends OffsetPaginationDTO {
     return values.map((item) => String(item).trim()).filter(Boolean);
   })
   caseSource?: CaseSource[];
+
+  @ApiPropertyOptional({
+    description: 'Dynamic frontend filters applied before querying grouped cases',
+    type: [FilterConditionDTO],
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FilterConditionDTO)
+  filters?: FilterConditionDTO[];
 
   @ApiPropertyOptional({
     description:
